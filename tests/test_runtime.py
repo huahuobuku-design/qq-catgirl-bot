@@ -12,6 +12,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from bot import CatGirlBot
 from configuration import DEFAULT_CONFIG
 from runtime_guard import InstanceLock
+from profiles import ProfileStore
 
 
 class RuntimeTests(unittest.TestCase):
@@ -25,9 +26,15 @@ class RuntimeTests(unittest.TestCase):
 
 class PermissionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.directory=tempfile.TemporaryDirectory()
+        store=ProfileStore(self.directory.name)
+        profile=store.create('test',{'base_url':'https://example.test/v1','model':'test'})
         cfg=deepcopy(DEFAULT_CONFIG);cfg['groups']['whitelist']=[123]
-        self.bot=CatGirlBot(cfg,logging.getLogger('test'))
+        cfg['engine']['profile_id']=profile.id
+        self.bot=CatGirlBot(cfg,logging.getLogger('test'),profile_store=store)
         self.worker=Mock();self.worker.muted=False;self.bot.get_worker=Mock(return_value=self.worker)
+
+    async def asyncTearDown(self):self.directory.cleanup()
 
     def event(self,text,role='member',mid=1):
         return {'post_type':'message','message_type':'group','group_id':123,'user_id':456,'self_id':999,

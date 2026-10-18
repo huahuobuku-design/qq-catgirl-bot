@@ -1,7 +1,6 @@
 """Async Chat Completions adapter, shared by all API providers."""
 import asyncio
 import json
-import os
 from pathlib import Path
 import time
 import httpx
@@ -27,6 +26,10 @@ class ApiEngine:
         return url if url.endswith('/chat/completions') else url + '/chat/completions'
 
     async def generate(self, text, user, history, mood=None, sticker_options=None):
+        if self.config.get('_profile_id'):
+            from profiles import ProfileStore
+            try:ProfileStore(self.config['_profiles_dir']).load(self.config['_profile_id'])
+            except ValueError as error:raise ApiError(str(error)) from None
         if not self.usable:
             raise ApiError('API 地址或模型 ID 尚未配置')
         prompt = self.config.get('system_prompt') or (Path(__file__).parent/'persona_devil.md').read_text(encoding='utf-8')
@@ -45,7 +48,7 @@ class ApiEngine:
                 'temperature': float(self.config.get('temperature', 0.9))}
         if self.config.get('json_mode', False):
             body['response_format'] = {'type': 'json_object'}
-        key = os.environ.get(self.config.get('api_key_env', 'CATGIRL_API_KEY'), '') or self.config.get('api_key', '')
+        key = self.config.get('api_key', '')
         headers = {'Authorization': 'Bearer '+key} if key else {}
         seconds = float(self.config.get('timeout', 30))
         started = time.monotonic()

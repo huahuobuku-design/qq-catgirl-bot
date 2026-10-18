@@ -17,6 +17,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from bot import CatGirlBot, GroupWorker, OneBot
 from configuration import DEFAULT_CONFIG
 from import_stickers import build_catalog
+from profiles import ProfileStore
 
 
 class IntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -45,10 +46,11 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             cfg=deepcopy(DEFAULT_CONFIG);cfg['groups']['whitelist']=[123]
             cfg['reply'].update(debounce_seconds=0,max_wait_seconds=0,min_interval_seconds=0)
             cfg['engine'].update(sticker_dir=str(pack),sticker_state_dir=str(root/'history'),emotion_state_dir=str(root/'mood'))
-            cfg['engine']['llm'].update(base_url='https://example.test/v1',model='test')
+            store=ProfileStore(root/'profiles')
+            cfg['engine']['profile_id']=store.create('test',{'base_url':'https://example.test/v1','model':'test'}).id
             async with serve(handler,'127.0.0.1',0) as server:
                 cfg['onebot_url']=f'ws://127.0.0.1:{server.sockets[0].getsockname()[1]}'
-                bot=CatGirlBot(cfg,logging.getLogger('integration'))
+                bot=CatGirlBot(cfg,logging.getLogger('integration'),profile_store=store)
                 bot.cat.llm.transport=httpx.MockTransport(api)
                 task=asyncio.create_task(bot.run_forever())
                 try:

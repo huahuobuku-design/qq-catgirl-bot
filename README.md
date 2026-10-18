@@ -6,7 +6,8 @@
 
 ## 功能
 
-- **只通过 API 调用模型**：填写服务商提供的API地址、模型ID及Key；不依赖其他应用的账号登录。
+- **只通过 API 调用模型**：先在本地新建并保存API档案，再选择使用；不依赖其他应用的账号登录。
+- **档案保存后只读**：可以选择、查看摘要或删除，不能编辑；更换地址、模型、Key及其他参数时必须新建档案。
 - **短句连发**：通常1～3条，每条尽量6～20字，程序上限28字；气泡间隔约0.8秒。每轮连同等待提示及图片最多4条。
 - **情绪延续**：按群保存愤怒、委屈和简单的捉弄次数。被夸后会软化，重启保留数值状态。
 - **自行导入表情包**：支持PNG/JPG/GIF/WebP，按描述和情绪选图、避免近期重复。仓库不附带任何素材；空图库仍能聊天。
@@ -33,15 +34,17 @@ Linux如缺少tkinter，需安装发行版提供的Python Tk包。无桌面环�
 
 ## 第一次配置
 
-1. 在控制台填写API地址（如平台提供的 `/v1` 地址或完整 `/chat/completions` 地址）、模型ID和API Key。
+1. 在控制台点“新建档案”，填写档案名称、API地址（平台提供的 `/v1` 地址或完整 `/chat/completions` 地址）、模型ID和API Key，核对后保存。
 2. 点“本地试聊”检查模型。此处不会向QQ发送消息。
 3. 在你自己的OneBot客户端中登录QQ，启用**正向WebSocket服务器**，本机地址通常为 `ws://127.0.0.1:3001`。两端Token需一致。
 4. 填入允许回复的群号，多个群用逗号分隔，点“检查QQ”。
 5. 点“开启群回复”，在群里发送“猫娘你好”或@机器人。
 
-程序会在首次运行时生成被Git忽略的 `config.json`，也可复制 `config.example.json` 后手动编辑。修改配置需重启群回复。
+程序会在首次运行时生成被Git忽略的 `config.json`，也可复制 `config.example.json` 后手动编辑。它只保存选中的 `engine.profile_id`，不保存内嵌API参数。未保存档案、未选档案或在用档案已被删除时不能调用API。修改群聊配置需重启群回复。
 
-API Key可以留空并使用环境变量 `CATGIRL_API_KEY`。程序不会自动加载 `.env`；请由你的终端或部署环境设置变量。
+API档案保存在本机 `data/api_profiles/`，包含Key的明文文件不会提交Git。没有编辑功能，也不会用环境变量覆盖已保存的Key；Key轮换或更换模型需新建档案。删除正在使用的档案会停止群回复。文件完整性校验用于发现意外编辑，不是密钥加密，也不能阻止电脑所有者直接操作文件。
+
+无桌面环境可运行 `python profiles.py create` 交互式建档，用 `python profiles.py list` 查看ID，再把ID填入 `config.json` 的 `engine.profile_id`。`python profiles.py delete <ID>` 可删除档案。不通过命令行参数传递Key。
 
 ## 常用配置
 
@@ -53,12 +56,12 @@ API Key可以留空并使用环境变量 `CATGIRL_API_KEY`。程序不会自动�
 | `reply.keywords` | `["猫娘"]`，可添加其他唤醒词 |
 | `administration.admin_ids` | 额外允许管理机器人的QQ号；群主/管理员也可管理 |
 | `administration.allow_member_controls` | `false`，不开放普通成员静音/唤醒 |
-| `engine.llm.timeout` | 总请求时限30秒，含并发排队；取消会中止网络请求 |
-| `engine.llm.json_mode` | `false`；服务商支持JSON模式时可启用 |
-| `engine.llm.trust_env` | `true`，遵循HTTP代理环境变量；连接本地API时按环境调整 |
+| `engine.profile_id` | 必须选择已在本地保存的API档案 |
 | `privacy.log_message_content` | `false`，默认不把聊天原文写入日志 |
 
 群管理命令：“猫娘闭嘴”“猫娘说话”。回复概率、合并窗口、冷却和消息上限可在 `reply` 下调整。
+
+建档时可设置总超时（默认30秒，包含并发排队）、输出Token上限（默认400）、温度、JSON模式（默认关闭）及是否遵循代理环境变量。保存后这些参数同样不可编辑。
 
 ## 表情包与人格
 
@@ -87,7 +90,7 @@ python import_stickers.py
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖API回复与选图、鉴权/限流错误、真正取消超时请求、空图库、GIF导入、短句拆分、管理员权限、单实例锁，以及模拟OneBot WebSocket到API再到文字/GIF发送的完整流程。测试不要求付费密钥，也不会给真实QQ群发消息。
+测试覆盖只读API建档、保存前禁止使用、删除在用档案后停止服务、档案意外修改检测、API回复与选图、鉴权/限流错误、超时取消、空图库、GIF导入、短句拆分、管理员权限、单实例锁，以及模拟OneBot到API再到文字/GIF发送的完整流程。测试不要求付费密钥，也不会给真实QQ群发消息。
 
 GitHub Actions配置了Windows/Linux与Python 3.11/3.12测试；本地测试通过不代表远端工作流已经通过。
 

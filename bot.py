@@ -360,10 +360,12 @@ class GroupWorker:
 # --------------------------------------------------------------------------
 
 class CatGirlBot:
-    def __init__(self, cfg: Dict[str, Any], logger: logging.Logger):
+    def __init__(self, cfg: Dict[str, Any], logger: logging.Logger, profile_store=None):
         self.cfg = cfg
         self.logger = logger
-        self.cat = CatGirl(dict(cfg.get("engine") or {}, persona=cfg.get("persona") or {}), logger=logger)
+        from profiles import ProfileStore, resolve_api_settings
+        self.profile_store = profile_store or ProfileStore()
+        self.cat = CatGirl(dict(cfg.get("engine") or {}, llm=resolve_api_settings(cfg,self.profile_store), persona=cfg.get("persona") or {}), logger=logger)
         self.bot = OneBot(cfg["onebot_url"], cfg.get("access_token", ""), logger)
         self.bot.on_event = self.on_event
         self.workers: Dict[int, GroupWorker] = {}
@@ -477,8 +479,21 @@ class CatGirlBot:
     async def run_forever(self) -> None:
         backoff = 1.0
         while True:
+            profile_watch = None
             try:
+                try:self.profile_store.load(self.cfg['engine']['profile_id'])
+                except ValueError:
+                    self.logger.error('在用API档案已删除或失效，群回复已停止')
+                    return
                 await self.bot.connect()
+                async def watch_profile():
+                    while True:
+                        await asyncio.sleep(1)
+                        try:self.profile_store.load(self.cfg['engine']['profile_id'])
+                        except ValueError:
+                            await self.bot.close()
+                            return
+                profile_watch=asyncio.create_task(watch_profile())
                 self.logger.info('已连接 OneBot')
                 backoff = 1.0
                 await self.bot.pump()
@@ -493,6 +508,9 @@ class CatGirlBot:
             except Exception as e:
                 self.logger.error(f"连接异常：{type(e).__name__}: {e}")
             finally:
+                if profile_watch:
+                    profile_watch.cancel()
+                    await asyncio.gather(profile_watch,return_exceptions=True)
                 await self.bot.close()
                 for w in self.workers.values():
                     w.stop()

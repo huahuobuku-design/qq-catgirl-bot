@@ -12,6 +12,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from api_engine import ApiEngine, ApiError
 from catgirl import CatGirl
 from configuration import DEFAULT_CONFIG, validate_config
+from profiles import ProfileStore
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -78,9 +79,13 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
 class ConfigurationTests(unittest.TestCase):
     def test_safe_defaults_and_validation(self):
-        cfg=deepcopy(DEFAULT_CONFIG);cfg['engine']['llm'].update(base_url='https://example.test/v1',model='test')
-        with self.assertRaises(ValueError):validate_config(cfg)
-        cfg['groups']['whitelist']=[123];validate_config(cfg)
+        cfg=deepcopy(DEFAULT_CONFIG)
+        with tempfile.TemporaryDirectory() as folder:
+            store=ProfileStore(folder)
+            with self.assertRaises(ValueError):validate_config(cfg,profile_store=store)
+            cfg['engine']['profile_id']=store.create('test',{'base_url':'https://example.test/v1','model':'test'}).id
+            with self.assertRaises(ValueError):validate_config(cfg,profile_store=store)
+            cfg['groups']['whitelist']=[123];validate_config(cfg,profile_store=store)
         self.assertFalse(cfg['privacy']['log_message_content'])
         self.assertEqual(cfg['reply']['trigger'],'mention_or_keyword')
 

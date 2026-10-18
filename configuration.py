@@ -1,9 +1,11 @@
 """Portable defaults and validation. User configuration is never part of the repo."""
 from copy import deepcopy
 import json
-import os
 from pathlib import Path
 from urllib.parse import urlsplit
+
+API_DEFAULTS = {'base_url':'', 'api_key':'', 'model':'', 'timeout':30.0,
+                'max_tokens':400, 'temperature':0.9, 'json_mode':False, 'trust_env':True}
 
 DEFAULT_CONFIG = {
     'onebot_url': 'ws://127.0.0.1:3001', 'access_token': '', 'self_id': 0,
@@ -14,9 +16,7 @@ DEFAULT_CONFIG = {
               'context_size': 20, 'focus_recent': 2, 'max_burst': 4, 'ack_after_seconds': 6.0},
     'persona': {'name': '猫娘', 'call_user': '主人'},
     'privacy': {'log_message_content': False},
-    'engine': {'llm': {'base_url': '', 'api_key': '', 'api_key_env': 'CATGIRL_API_KEY',
-                       'model': '', 'timeout': 30.0, 'max_tokens': 400, 'temperature': 0.9,
-                       'json_mode': False, 'trust_env': True, 'system_prompt': ''}},
+    'engine': {'profile_id': ''},
 }
 
 
@@ -45,17 +45,7 @@ def save_config(path, config):
     temporary.replace(file)
 
 
-def api_key(config):
-    llm = config.get('engine', {}).get('llm', {})
-    return os.environ.get(llm.get('api_key_env', 'CATGIRL_API_KEY'), '') or llm.get('api_key', '')
-
-
-def validate_config(config, require_groups=True):
-    uri = urlsplit(config['onebot_url'])
-    if uri.scheme not in ('ws', 'wss') or not uri.hostname or uri.username or uri.password or uri.query or uri.fragment:
-        raise ValueError('QQ 接入地址必须使用 ws:// 或 wss://')
-    _ = uri.port
-    llm = config['engine']['llm']
+def validate_api_settings(llm):
     endpoint = urlsplit(llm['base_url'])
     if endpoint.scheme not in ('http', 'https') or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
         raise ValueError('请填写有效的模型 API 地址，不能在地址中嵌入凭据')
@@ -63,6 +53,17 @@ def validate_config(config, require_groups=True):
         raise ValueError('请填写 API 平台提供的模型 ID')
     if not 1 <= float(llm['timeout']) <= 120 or not 1 <= int(llm['max_tokens']) <= 8192:
         raise ValueError('API 超时须为1～120秒，输出额度须为1～8192')
+    if not isinstance(llm.get('api_key',''),str) or not 0<=float(llm.get('temperature',.9))<=2:
+        raise ValueError('API Key须为文字，温度须为0～2')
+
+
+def validate_config(config, require_groups=True, profile_store=None):
+    uri = urlsplit(config['onebot_url'])
+    if uri.scheme not in ('ws', 'wss') or not uri.hostname or uri.username or uri.password or uri.query or uri.fragment:
+        raise ValueError('QQ 接入地址必须使用 ws:// 或 wss://')
+    _ = uri.port
+    from profiles import resolve_api_settings
+    resolve_api_settings(config,profile_store)
     groups = config['groups']
     for key in ('whitelist', 'blacklist'):
         if not isinstance(groups[key], list) or any(type(g) is not int or g <= 0 for g in groups[key]):

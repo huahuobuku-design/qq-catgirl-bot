@@ -33,17 +33,6 @@
     "log_message_content": false
   },
   "engine": {
-    "llm": {
-      "base_url": "",
-      "api_key": "",
-      "api_key_env": "CATGIRL_API_KEY",
-      "model": "",
-      "timeout": 30.0,
-      "max_tokens": 400,
-      "temperature": 0.9,
-      "json_mode": false,
-      "trust_env": true,
-      "system_prompt": ""
-    }
+    "profile_id": ""
   }
 }

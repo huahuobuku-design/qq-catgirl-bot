@@ -15,6 +15,7 @@ from bot import OneBot
 from catgirl import CatGirl
 from configuration import load_config, save_config, validate_config
 from runtime_guard import InstanceLock
+from profiles import ProfileStore, resolve_api_settings
 
 ROOT = Path(__file__).parent
 
@@ -28,23 +29,33 @@ class Panel:
         self.history = []
         self.events = queue.Queue()
         self.fields = {}
+        self.profiles = ProfileStore()
+        self.profile_labels = {}
         window.title('QQ猫娘 · API版')
         window.geometry('900x760')
         frame = ttk.Frame(window, padding=20); frame.pack(fill='both', expand=True)
         ttk.Label(frame, text='猫娘的小窝 ฅ^•ﻌ•^ฅ', font=('', 22, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='配置API → 本地试聊 → 登录自己的OneBot客户端 → 开启指定群回复').pack(anchor='w', pady=10)
+        ttk.Label(frame, text='新建并保存API档案 → 选择档案 → 本地试聊 → 开启指定群回复').pack(anchor='w', pady=10)
         form = ttk.LabelFrame(frame, text='连接配置', padding=12); form.pack(fill='x')
-        llm = self.config['engine']['llm']
         values = [('onebot_url','QQ WebSocket地址',self.config['onebot_url']),
                   ('access_token','OneBot Token',self.config['access_token']),
-                  ('groups','允许回复的群号（逗号分隔）',','.join(map(str,self.config['groups']['whitelist']))),
-                  ('base_url','模型API地址',llm['base_url']), ('model','模型ID',llm['model']),
-                  ('api_key','API Key（可改用环境变量）',llm['api_key'])]
+                  ('groups','允许回复的群号（逗号分隔）',','.join(map(str,self.config['groups']['whitelist'])))]
         for row,(key,label,value) in enumerate(values):
             ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',padx=8,pady=4)
             variable=tk.StringVar(value=value); self.fields[key]=variable
             ttk.Entry(form,textvariable=variable,show='*' if key in ('api_key','access_token') else '').grid(row=row,column=1,sticky='ew')
         form.columnconfigure(1,weight=1)
+        api_frame=ttk.LabelFrame(frame,text='本地API档案（保存后只读，可删除后重新建档）',padding=10)
+        api_frame.pack(fill='x',pady=8)
+        self.profile_choice=tk.StringVar()
+        self.profile_box=ttk.Combobox(api_frame,textvariable=self.profile_choice,state='readonly',width=52)
+        self.profile_box.pack(side='left',fill='x',expand=True)
+        self.profile_box.bind('<<ComboboxSelected>>',self.select_profile)
+        ttk.Button(api_frame,text='新建档案',command=self.new_profile).pack(side='left',padx=6)
+        ttk.Button(api_frame,text='删除档案',command=self.delete_profile).pack(side='left')
+        self.profile_detail=tk.StringVar(value='尚未选择API档案')
+        ttk.Label(frame,textvariable=self.profile_detail,wraplength=850).pack(anchor='w')
+        self.refresh_profiles(self.config['engine'].get('profile_id',''))
         self.all_messages=tk.BooleanVar(value=self.config['reply']['trigger']=='all')
         ttk.Checkbutton(frame,text='回复指定群的所有文字（默认仅@或含“猫娘”时回复）',variable=self.all_messages).pack(anchor='w',pady=8)
         row=ttk.Frame(frame);row.pack(fill='x',pady=6)
@@ -59,13 +70,70 @@ class Panel:
         ttk.Button(row,text='本地试聊',command=self.chat).pack(side='left',padx=8)
         window.protocol('WM_DELETE_WINDOW',self.close);window.after(100,self.poll)
 
+    def refresh_profiles(self, selected=''):
+        records=self.profiles.list()
+        self.profile_labels={f'{p.name} · {p.settings["model"]} · {p.id[:6]}':p.id for p in records}
+        self.profile_box['values']=list(self.profile_labels)
+        label=next((label for label,identifier in self.profile_labels.items() if identifier==selected),'')
+        self.profile_choice.set(label)
+        if label:
+            p=self.profiles.load(selected)
+            self.profile_detail.set(f'只读：{p.settings["base_url"]} · {p.settings["model"]} · Key：'+('已保存（隐藏）' if p.settings['api_key'] else '未设置'))
+        else:self.profile_detail.set('请先新建并保存API档案，再选择使用')
+
+    def select_profile(self,event=None):
+        selected=self.profile_labels.get(self.profile_choice.get(),'')
+        if self.process and self.process.poll() is None:self.stop()
+        self.refresh_profiles(selected)
+        self.status.set('API档案已选择；如需群回复，请重新开启')
+
+    def new_profile(self):
+        dialog=tk.Toplevel(self.window);dialog.title('新建API档案 · 保存后不可修改')
+        dialog.transient(self.window);dialog.grab_set()
+        frame=ttk.Frame(dialog,padding=18);frame.pack(fill='both',expand=True)
+        entries={}
+        fields=[('name','档案名称',''),('base_url','API地址',''),('model','模型ID',''),
+                ('api_key','API Key（本地接口可为空）',''),('timeout','总超时（秒）','30'),
+                ('max_tokens','输出Token上限','400'),('temperature','温度','0.9')]
+        for row,(key,label,value) in enumerate(fields):
+            ttk.Label(frame,text=label).grid(row=row,column=0,sticky='w',pady=5,padx=5)
+            entries[key]=tk.StringVar(value=value)
+            ttk.Entry(frame,textvariable=entries[key],show='*' if key=='api_key' else '',width=48).grid(row=row,column=1,sticky='ew')
+        json_mode=tk.BooleanVar(value=False);trust_env=tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame,text='API支持JSON模式',variable=json_mode).grid(row=7,columnspan=2,sticky='w')
+        ttk.Checkbutton(frame,text='遵循系统代理环境变量',variable=trust_env).grid(row=8,columnspan=2,sticky='w')
+        ttk.Label(frame,text='保存前请核对。保存后只能选择、使用或删除；更换参数请新建档案。',wraplength=530).grid(row=9,columnspan=2,pady=10)
+        def save_new():
+            try:
+                values={key:variable.get().strip() for key,variable in entries.items()}
+                name=values.pop('name');values['timeout']=float(values['timeout'])
+                values['max_tokens']=int(values['max_tokens']);values['temperature']=float(values['temperature'])
+                values.update(json_mode=json_mode.get(),trust_env=trust_env.get())
+                profile=self.profiles.create(name,values)
+                if self.process and self.process.poll() is None:self.stop()
+                self.refresh_profiles(profile.id)
+                self.status.set('新API档案已保存并选中，可本地试聊或开启群回复')
+                dialog.destroy()
+            except (ValueError,OSError) as error:messagebox.showerror('档案未保存',str(error),parent=dialog)
+        ttk.Button(frame,text='保存新档案',command=save_new).grid(row=10,columnspan=2,pady=8)
+
+    def delete_profile(self):
+        selected=self.profile_labels.get(self.profile_choice.get(),'')
+        if not selected:return
+        if not messagebox.askyesno('删除API档案','删除后不能恢复，正在使用此档案的群回复也会停止。确定删除？'):return
+        try:
+            self.stop();self.profiles.delete(selected);self.refresh_profiles()
+            self.config['engine']={'profile_id':''};save_config(ROOT/'config.json',self.config)
+            self.status.set('档案已删除，请新建或重新选择API档案')
+        except (ValueError,OSError) as error:messagebox.showerror('删除失败',str(error))
+
     def save(self):
         try:
             values={key:value.get().strip() for key,value in self.fields.items()}
             self.config['onebot_url']=values['onebot_url'];self.config['access_token']=values['access_token']
             self.config['groups']['whitelist']=[int(g.strip()) for g in values['groups'].replace('，',',').split(',') if g.strip()]
             self.config['reply']['trigger']='all' if self.all_messages.get() else 'mention_or_keyword'
-            self.config['engine']['llm'].update({key:values[key] for key in ('base_url','model','api_key')})
+            self.config['engine']={'profile_id':self.profile_labels.get(self.profile_choice.get(),'')}
             save_config(ROOT/'config.json',self.config)
             self.status.set('已保存 · 已运行的群回复需停止后重启以应用配置')
             return True
@@ -124,7 +192,7 @@ class Panel:
         try:validate_config(self.config,require_groups=False)
         except ValueError as error:messagebox.showerror('API未配置',str(error));return
         self.input.delete(0,'end');self.write('你：'+text);self.history.append({'user':'主人','text':text})
-        self.history=self.history[-20:];history=list(self.history);config=json.loads(json.dumps(self.config['engine']))
+        self.history=self.history[-20:];history=list(self.history);config={'llm':resolve_api_settings(self.config,self.profiles)}
         self.busy=True
         def work():
             try:

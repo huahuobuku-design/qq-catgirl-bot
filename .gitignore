@@ -1,0 +1,31 @@
+# Credentials and user configuration
+config.json
+config.*.json
+!config.example.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+# Chat logs, state, locks, reports and local backups
+data/
+*.log
+*.lock
+*.tmp
+*.bak
+backups/
+# User-supplied stickers: no images/catalog in the public repository
+stickers/**
+!stickers/README.md
+# Python environments and build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.coverage
+.DS_Store
+Thumbs.db
